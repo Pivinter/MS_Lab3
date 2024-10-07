@@ -1,0 +1,126 @@
+#include <avr/io.h>
+#include <util/delay.h>
+
+#define SCK PB5
+#define SDI PB3
+#define LATCH PB2
+
+uint8_t vbuf[8];
+
+const uint8_t hello_v[6][8] = {
+    // 'H'
+    {0b01100110, 0b01100110, 0b01100110, 0b01111110, 0b01100110, 0b01100110, 0b01100110, 0b00000000},
+    // 'e'
+    {0b00111100, 0b01100110, 0b01100110, 0b01111110, 0b01100000, 0b01100110, 0b00111100, 0b00000000},
+    // 'l'
+    {0b00011110, 0b00001100, 0b00001100, 0b00001100, 0b00001100, 0b00001100, 0b00111110, 0b00000000},
+    // 'l'
+    {0b00011110, 0b00001100, 0b00001100, 0b00001100, 0b00001100, 0b00001100, 0b00111110, 0b00000000},
+    // 'o'
+    {0b00111100, 0b01100110, 0b01100110, 0b01100110, 0b01100110, 0b01100110, 0b00111100, 0b00000000},
+    // 'v'
+    {0b01100110, 0b01100110, 0b01100110, 0b00111100, 0b00111100, 0b00011000, 0b00011000, 0b00000000}
+};
+
+void rotate_90_clockwise()
+{
+    uint8_t rotated_vbuf[8] = {0};
+    for (uint8_t x = 0; x < 8; x++) {
+        for (uint8_t y = 0; y < 8; y++) {
+            if (vbuf[y] & (1 << x)) {
+                rotated_vbuf[x] |= (1 << (7 - y));
+            }
+        }
+    }
+
+    for (uint8_t i = 0; i < 8; i++) {
+        vbuf[i] = rotated_vbuf[i];
+    }
+
+    max7219_Update();
+}
+
+
+void spi_transfer(uint8_t data)
+{
+    uint8_t i;
+    for(i = 0; i < 8; i++)
+    {
+        if(data & 0x80) {
+            PORTB |= 1 << SDI;
+        } else {
+            PORTB &= ~(1 << SDI);
+        }
+        data <<= 1;
+        PORTB |= 1 << SCK;
+        _delay_us(1);
+        PORTB &= ~(1 << SCK);
+        _delay_us(1);
+    }
+}
+
+void max7219_sendData(uint8_t addr, uint8_t data)
+{
+    PORTB &= ~(1 << PB2);
+    // SPDR = addr;
+    // while (!(SPSR & (1<<SPIF)));
+    // SPDR = data;
+    // while (!(SPSR & (1<<SPIF)));
+    spi_transfer(addr);
+    spi_transfer(data);
+    PORTB |= (1 << PB2);
+}
+
+void SPI_MasterInit(void)
+{
+    DDRB |= (1<<PB3)|(1<<PB5);
+    // SPCR = (1<<SPE)|(1<<MSTR)|(0<<SPR0);
+}
+
+void max7219_Init(void)
+{
+    DDRB |= 1 << PB2;
+    max7219_sendData(0x0F, 0);
+    max7219_sendData(0x09, 0);
+    max7219_sendData(0x0B, 7);
+    max7219_sendData(0x0A, 1);
+    max7219_sendData(0x0C, 1);
+    for (uint8_t i = 0; i < 8; i++) {
+        max7219_sendData(i+1, 0);
+    }
+}
+
+void max7219_Update()
+{
+    for (uint8_t i = 0; i < 8; i++) {
+        max7219_sendData(i+1, vbuf[i]);
+    }
+}
+
+void scroll_text(const uint8_t text[][8], uint8_t num_letters)
+{
+    for (uint8_t letter = 0; letter < num_letters; letter++) {
+        for (uint8_t col = 0; col < 8; col++) {
+            for (uint8_t i = 0; i < 8; i++) {
+                vbuf[i] <<= 1;
+                vbuf[i] |= (text[letter][i] & (1 << (7 - col))) >> (7 - col);
+            }
+            rotate_90_clockwise();
+            // max7219_Update();
+            _delay_ms(200);
+        }
+    }
+}
+
+int main(void)
+{
+    SPI_MasterInit();
+    max7219_Init();
+
+    while (1) {
+        scroll_text(hello_v, 6);
+        _delay_ms(2000);
+    }
+
+    return 0;
+}
